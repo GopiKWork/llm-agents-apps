@@ -1,0 +1,18 @@
+{
+  "vpc": {
+    "vpc_id": "vpc-xxxxxxxxxx",
+    "subnet_id": "subnet-xxxxxxxxxx",
+    "security_group_id": "sg-xxxxxxxxxx"
+  },
+  "matlab_mcp": {
+    "url": "http://10.0.1.100:8000/mcp"
+  },
+  "agent": {
+    "name": "numerical-solver-agent",
+    "arn": "",
+    "model_id": "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+  },
+  "aws": {
+    "region": "us-west-2"
+  }
+}

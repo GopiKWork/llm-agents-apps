@@ -1,0 +1,397 @@
+#!/usr/bin/env python3
+"""
+Numerical Solver Agent runtime for VPC deployment with IAM authentication
+Connects to MATLAB MCP server via private subnet
+Provides mathematical and computational solving capabilities
+"""
+
+from strands import Agent, tool
+from strands.models import BedrockModel
+from bedrock_agentcore.runtime import BedrockAgentCoreApp
+from datetime import datetime
+import json
+import traceback as tb
+import math
+
+# MCP Server URL - will be replaced during deployment
+MATLAB_MCP_URL = "{{ matlab_mcp_url }}"
+
+app = BedrockAgentCoreApp()
+
+# Global error log
+ERROR_LOG = []
+
+def log_error(context, error, traceback_str=None):
+    """Log an error with context"""
+    error_entry = {
+        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "context": context,
+        "error": str(error),
+        "error_type": type(error).__name__
+    }
+    if traceback_str:
+        error_entry["traceback"] = traceback_str
+    
+    ERROR_LOG.append(error_entry)
+    print(f"[ERROR] {context}: {error}")
+
+# Create custom tools
+@tool
+def get_time():
+    """Get current time"""
+    try:
+        return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+    except Exception as e:
+        log_error("get_time", e, tb.format_exc())
+        return f"Error getting time: {e}"
+
+@tool
+def get_error_log():
+    """Get all errors encountered by the agent during initialization and execution"""
+    if not ERROR_LOG:
+        return "No errors recorded."
+    
+    error_report = f"Total errors: {len(ERROR_LOG)}\n\n"
+    for i, error in enumerate(ERROR_LOG, 1):
+        error_report += f"Error {i}:\n"
+        error_report += f"  Time: {error['timestamp']}\n"
+        error_report += f"  Context: {error['context']}\n"
+        error_report += f"  Type: {error['error_type']}\n"
+        error_report += f"  Message: {error['error']}\n"
+        if 'traceback' in error:
+            error_report += f"  Traceback:\n{error['traceback']}\n"
+        error_report += "\n"
+    
+    return error_report
+
+@tool
+def solve_quadratic(a: float, b: float, c: float):
+    """
+    Solve quadratic equation ax^2 + bx + c = 0
+    Returns both real and complex roots
+    
+    Args:
+        a: Coefficient of x^2
+        b: Coefficient of x
+        c: Constant term
+    """
+    try:
+        discriminant = b**2 - 4*a*c
+        
+        if discriminant >= 0:
+            root1 = (-b + math.sqrt(discriminant)) / (2*a)
+            root2 = (-b - math.sqrt(discriminant)) / (2*a)
+            return {
+                "root1": root1,
+                "root2": root2,
+                "type": "real",
+                "discriminant": discriminant
+            }
+        else:
+            real_part = -b / (2*a)
+            imag_part = math.sqrt(abs(discriminant)) / (2*a)
+            return {
+                "root1": f"{real_part} + {imag_part}i",
+                "root2": f"{real_part} - {imag_part}i",
+                "type": "complex",
+                "discriminant": discriminant
+            }
+    except Exception as e:
+        log_error("solve_quadratic", e, tb.format_exc())
+        return f"Error solving quadratic: {e}"
+
+@tool
+def factorial(n: int):
+    """
+    Calculate factorial of a non-negative integer
+    
+    Args:
+        n: Non-negative integer
+    """
+    try:
+        if n < 0:
+            return "Error: Factorial is not defined for negative numbers"
+        if n > 170:
+            return "Error: Number too large (max 170)"
+        
+        result = math.factorial(n)
+        return {"n": n, "factorial": result}
+    except Exception as e:
+        log_error("factorial", e, tb.format_exc())
+        return f"Error calculating factorial: {e}"
+
+@tool
+def gcd_lcm(a: int, b: int):
+    """
+    Calculate Greatest Common Divisor (GCD) and Least Common Multiple (LCM)
+    
+    Args:
+        a: First integer
+        b: Second integer
+    """
+    try:
+        gcd_val = math.gcd(a, b)
+        lcm_val = abs(a * b) // gcd_val if gcd_val != 0 else 0
+        
+        return {
+            "a": a,
+            "b": b,
+            "gcd": gcd_val,
+            "lcm": lcm_val
+        }
+    except Exception as e:
+        log_error("gcd_lcm", e, tb.format_exc())
+        return f"Error calculating GCD/LCM: {e}"
+
+@tool
+def convert_units(value: float, from_unit: str, to_unit: str):
+    """
+    Convert between common units (length, temperature, weight)
+    
+    Supported conversions:
+    - Length: m, km, cm, mm, ft, in, mi
+    - Temperature: C, F, K
+    - Weight: kg, g, lb, oz
+    
+    Args:
+        value: Numeric value to convert
+        from_unit: Source unit
+        to_unit: Target unit
+    """
+    try:
+        # Length conversions to meters
+        length_to_m = {
+            'm': 1, 'km': 1000, 'cm': 0.01, 'mm': 0.001,
+            'ft': 0.3048, 'in': 0.0254, 'mi': 1609.34
+        }
+        
+        # Weight conversions to kg
+        weight_to_kg = {
+            'kg': 1, 'g': 0.001, 'lb': 0.453592, 'oz': 0.0283495
+        }
+        
+        # Temperature conversions
+        if from_unit in ['C', 'F', 'K'] and to_unit in ['C', 'F', 'K']:
+            # Convert to Celsius first
+            if from_unit == 'F':
+                celsius = (value - 32) * 5/9
+            elif from_unit == 'K':
+                celsius = value - 273.15
+            else:
+                celsius = value
+            
+            # Convert from Celsius to target
+            if to_unit == 'F':
+                result = celsius * 9/5 + 32
+            elif to_unit == 'K':
+                result = celsius + 273.15
+            else:
+                result = celsius
+            
+            return {"value": value, "from": from_unit, "to": to_unit, "result": result}
+        
+        # Length conversions
+        if from_unit in length_to_m and to_unit in length_to_m:
+            meters = value * length_to_m[from_unit]
+            result = meters / length_to_m[to_unit]
+            return {"value": value, "from": from_unit, "to": to_unit, "result": result}
+        
+        # Weight conversions
+        if from_unit in weight_to_kg and to_unit in weight_to_kg:
+            kg = value * weight_to_kg[from_unit]
+            result = kg / weight_to_kg[to_unit]
+            return {"value": value, "from": from_unit, "to": to_unit, "result": result}
+        
+        return f"Error: Unsupported conversion from {from_unit} to {to_unit}"
+        
+    except Exception as e:
+        log_error("convert_units", e, tb.format_exc())
+        return f"Error converting units: {e}"
+
+@tool
+def percentage_calculator(part: float, whole: float, operation: str = "find_percentage"):
+    """
+    Perform percentage calculations
+    
+    Operations:
+    - find_percentage: What percentage is 'part' of 'whole'?
+    - find_part: What is 'part' percent of 'whole'?
+    - find_whole: 'part' is 'whole' percent of what number?
+    
+    Args:
+        part: The part value
+        whole: The whole value
+        operation: Type of calculation
+    """
+    try:
+        if operation == "find_percentage":
+            if whole == 0:
+                return "Error: Cannot divide by zero"
+            percentage = (part / whole) * 100
+            return {"part": part, "whole": whole, "percentage": percentage}
+        
+        elif operation == "find_part":
+            result = (part / 100) * whole
+            return {"percentage": part, "whole": whole, "part": result}
+        
+        elif operation == "find_whole":
+            if part == 0:
+                return "Error: Percentage cannot be zero"
+            result = (whole / part) * 100
+            return {"part": whole, "percentage": part, "whole": result}
+        
+        else:
+            return f"Error: Unknown operation '{operation}'"
+            
+    except Exception as e:
+        log_error("percentage_calculator", e, tb.format_exc())
+        return f"Error in percentage calculation: {e}"
+
+def initialize_mcp_client():
+    """Initialize and return MCP client with active session"""
+    try:
+        from strands.tools.mcp.mcp_client import MCPClient
+        from mcp.client.streamable_http import streamablehttp_client
+        
+        print(f"Connecting to MATLAB MCP server at: {MATLAB_MCP_URL}")
+        
+        def create_transport():
+            return streamablehttp_client(MATLAB_MCP_URL)
+        
+        # Create client and enter context
+        client = MCPClient(create_transport)
+        client.__enter__()
+        
+        print("MCP client session started")
+        return client
+            
+    except Exception as e:
+        traceback_str = tb.format_exc()
+        log_error("MCP client initialization", e, traceback_str)
+        print(f"Warning: Failed to initialize MCP client: {e}")
+        print(traceback_str)
+        return None
+
+def get_mcp_tools(client):
+    """Get MCP tools from MATLAB server using provided client"""
+    try:
+        if client is None:
+            print("MCP client not available, skipping tool loading")
+            return []
+        
+        tools = client.list_tools_sync()
+        print(f"Loaded {len(tools)} tools from MATLAB MCP server")
+        for tool in tools:
+            tool_name = getattr(tool, 'name', None) or getattr(tool, 'tool_name', None) or str(tool)
+            print(f"  - {tool_name}")
+        return tools
+            
+    except Exception as e:
+        traceback_str = tb.format_exc()
+        log_error("MCP tool loading", e, traceback_str)
+        print(f"Warning: Failed to load MCP tools: {e}")
+        print(traceback_str)
+        print("Agent will run without MATLAB tools")
+        return []
+
+def create_agent():
+    """Create numerical solver agent with fresh MCP connection"""
+    print("Initializing Numerical Solver Agent...")
+    
+    # Initialize MCP client
+    mcp_client = initialize_mcp_client()
+    
+    # Get MCP tools
+    mcp_tools = get_mcp_tools(mcp_client)
+    
+    # Local computational tools
+    local_tools = [
+        get_time,
+        get_error_log,
+        solve_quadratic,
+        factorial,
+        gcd_lcm,
+        convert_units,
+        percentage_calculator
+    ]
+    
+    # Combine all tools
+    all_tools = mcp_tools + local_tools
+    print(f"Total tools available: {len(all_tools)}")
+    print(f"  - MATLAB MCP tools: {len(mcp_tools)}")
+    print(f"  - Local tools: {len(local_tools)}")
+    
+    # Initialize Bedrock model
+    model_id = "global.anthropic.claude-haiku-4-5-20251001-v1:0"
+    model = BedrockModel(model_id=model_id)
+    
+    # Create agent
+    agent = Agent(
+        model=model,
+        tools=all_tools,
+        system_prompt="""You are a Numerical Solver Agent, an expert computational assistant specializing in 
+        mathematical problem-solving and numerical analysis.
+        
+        Your capabilities include:
+        - Advanced MATLAB-style numerical computations (statistics, linear algebra, trigonometry)
+        - Solving equations (quadratic, polynomial evaluation)
+        - Mathematical operations (factorial, GCD/LCM)
+        - Unit conversions (length, temperature, weight)
+        - Percentage calculations
+        - Array operations and statistical analysis
+        
+        When solving problems:
+        1. Break down complex problems into steps
+        2. Choose the most appropriate tool for each calculation
+        3. Show your work and explain the solution
+        4. Verify results when possible
+        5. Use MATLAB tools for array operations and advanced math
+        6. Use local tools for quick calculations and conversions
+        
+        If you encounter errors, use the get_error_log tool to retrieve detailed diagnostic information.
+        Always provide clear, accurate numerical solutions with proper units and context."""
+    )
+    
+    return agent, mcp_client
+
+@app.entrypoint
+async def numerical_solver_streaming(payload):
+    """
+    Invoke the numerical solver agent with streaming capabilities
+    Agent is initialized per request to ensure fresh MCP connection
+    """
+    user_input = payload.get("prompt")
+    print("User input:", user_input)
+    
+    # Create agent with fresh connection for each request
+    agent = None
+    mcp_client = None
+    
+    try:
+        agent, mcp_client = create_agent()
+        
+        # Stream each chunk as it becomes available
+        async for event in agent.stream_async(user_input):
+            if "data" in event:
+                yield event["data"]
+            
+    except Exception as e:
+        # Handle errors gracefully in streaming context
+        traceback_str = tb.format_exc()
+        log_error("Agent streaming", e, traceback_str)
+        error_response = {"error": str(e), "type": "stream_error"}
+        print(f"Streaming error: {error_response}")
+        print(traceback_str)
+        yield error_response
+    
+    finally:
+        # Clean up MCP client connection
+        if mcp_client is not None:
+            try:
+                mcp_client.__exit__(None, None, None)
+                print("MCP client session closed")
+            except Exception as e:
+                print(f"Warning: Error closing MCP client: {e}")
+
+if __name__ == "__main__":
+    app.run()
